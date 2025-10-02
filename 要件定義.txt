@@ -1,0 +1,300 @@
+{
+  "project": {
+    "name": "iPad 対応「日報×コード体系」集計アプリ",
+    "version": "1.0",
+    "owner": "現場管理/原価管理チーム",
+    "status": "SPEC-READY"
+  },
+  "context": {
+    "goal": "Excel（「データ(日報)」「コード」）を取り込み、工事番号・区分（大/小/小区画）・業者・期間で 規内/規外/計 の工数合計を即時集計・可視化する iPad 最適化 Web アプリ（PWA）。",
+    "minimum_value": "集計ピボット + KPI + 明細ドリルダウン + エクスポート（CSV/PDF）",
+    "out_of_scope": [
+      "会計/見積連携",
+      "勤怠打刻",
+      "写真台帳",
+      "BIM 連携（将来拡張）"
+    ]
+  },
+  "data_spec": {
+    "input_sheets": {
+      "daily_data": {
+        "sheet_name": "データ(日報)",
+        "columns_representative": [
+          "日付(YYYYMMDD|ExcelSerial|string)",
+          "業者名",
+          "報告者名",
+          "在籍",
+          "雇(雇用区分)",
+          "工事番号(Sxxxx)",
+          "小区画(code例: B12P/H5P/...)",
+          "小区分(code例: 25K/211/...)",
+          "規内(numeric)",
+          "規外(numeric)",
+          "計(numeric)"
+        ],
+        "notes": "ヘッダは位置揺れあり → 自動見出し検出 + マッピング UI 必須"
+      },
+      "codes": {
+        "sheet_name": "コード",
+        "columns": [
+          "大区分(code例:110)",
+          "大区分名称(例:組立)",
+          "小区分(code例:211)",
+          "小区分名称",
+          "備考"
+        ],
+        "primary_key": "小区分"
+      }
+    },
+    "normalized_store": {
+      "tables": {
+        "work_items": "id, work_date, contractor_id, reporter, headcount, employment_code, project_id, subarea_code, subwork_code, in_hours, out_hours, total_hours, src_hash, created_at",
+        "work_codes": "subwork_code PK, subwork_name, major_code, major_name, note, version, updated_at",
+        "projects": "project_id PK, project_code",
+        "contractors": "contractor_id PK, contractor_name"
+      },
+      "enrichment_logic": "work_items.subwork_code = work_codes.subwork_code → major_code/major_name を付与"
+    },
+    "data_rules": {
+      "total_hours_formula": "計 = max(0, coalesce(規内,0)+coalesce(規外,0))",
+      "missing": "規内/規外 空欄は 0、必須(日付/工事番号/小区分)欠落は隔離テーブルへ",
+      "duplicates": "(日付, 業者名, 工事番号, 小区分, 小区画, 報告者, 規内, 規外) が同一は重複候補 → 取込時に警告",
+      "undefined_codes": "小区分 が work_codes に未登録なら 未定義 タグで保留・後付け可能"
+    }
+  },
+  "functional_requirements": {
+    "F1_import": {
+      "capabilities": [
+        ".xlsx アップロード（ドラッグ&ドロップ）/ API",
+        "見出し自動検出（日本語キー語 + 近傍類似一致）→ マッピング確認 UI",
+        "日付パース（YYYYMMDD / Excel シリアル / 文字列）",
+        "差分: 行ハッシュ（主要列連結の SHA-256）で重複スキップ / 上書き選択",
+        "取込結果レポート（新規/更新/重複/エラー/未定義小区分）"
+      ]
+    },
+    "F2_code_match_master": {
+      "capabilities": [
+        "小区分 をキーに 大区分/名称 自動付与",
+        "未定義一覧の一括編集（小区分→大区分/名称 登録）",
+        "コード表のバージョン管理（履歴/ロールバック）"
+      ]
+    },
+    "F3_aggregate_search_visualize": {
+      "dimensions": [
+        "日付(年/月/週/日)",
+        "工事番号",
+        "大区分",
+        "小区分",
+        "小区画",
+        "業者",
+        "雇用区分"
+      ],
+      "metrics": [
+        "規内合計",
+        "規外合計",
+        "計合計",
+        "規外比率 = 規外/計"
+      ],
+      "features": [
+        "ピボット表 + グラフ（棒/積上げ/折れ線/円）",
+        "KPI カード: 規内・規外・計・規外比率",
+        "明細ドリルダウン（集計セル→原票行）",
+        "ビュー保存/共有（パラメタ永続化）",
+        "エクスポート: CSV/PDF（A4 横/表紙/フッタに集計条件）"
+      ]
+    },
+    "F4_access_audit": {
+      "auth": "Email+Pass or SSO(Google/Microsoft)",
+      "roles": [
+        "Viewer",
+        "Editor",
+        "Admin"
+      ],
+      "row_level_security": "現場/部署単位のデータスコープ制限",
+      "audit_log": "取込/編集/エクスポート/ログイン履歴を記録"
+    },
+    "F5_offline_pwa": {
+      "features": [
+        "Add to Home Screen",
+        "IndexedDB キャッシュ（最新ビュー/静的コード表）",
+        "オフライン時は 閲覧専用（再同期ボタン）"
+      ]
+    }
+  },
+  "non_functional_requirements": {
+    "devices": "iPadOS 16+ Safari",
+    "performance": "10万行の月次集計を 3s 以内 初回表示（サーバ集計＋結果ページング）",
+    "availability": "平日 7:00–20:00 で 99.9%",
+    "security": "TLS1.2+ / at-rest 暗号化 / OWASP ASVS L2 / 定期脆弱性スキャン",
+    "backup": "日次スナップショット 35日 / PITR / 復旧手順"
+  },
+  "ui_ux": {
+    "layout": "①フィルタ（折畳）②KPI ③ピボット+グラフ（2カラム可）",
+    "touch": "行高 ≥48px, タップ領域 ≥44px, 最小フォント 14pt",
+    "a11y": "色に依存しない数値/テクスチャ併記",
+    "quick_filters": "よく使う条件をワンタップ適用"
+  },
+  "api_spec": {
+    "import": {
+      "endpoint": "POST /api/import/excel",
+      "content_type": "multipart",
+      "response": {
+        "jobId": "string",
+        "inserted": "number",
+        "updated": "number",
+        "duplicates": "number",
+        "errors": "number",
+        "undefinedCodes": "number"
+      }
+    },
+    "aggregate": {
+      "endpoint": "GET /api/aggregate",
+      "query_params": [
+        "groupBy (csv) 例: 工事番号,大区分,小区分",
+        "metrics (csv) 例: 規内,規外,計",
+        "from (YYYY-MM-DD)",
+        "to (YYYY-MM-DD)",
+        "contractor",
+        "project",
+        "employment",
+        "page",
+        "pageSize"
+      ],
+      "response_example": {
+        "groups": [
+          "工事番号",
+          "大区分",
+          "小区分"
+        ],
+        "rows": [
+          {
+            "工事番号": "S6290",
+            "大区分": "110 組立",
+            "小区分": "211 配材作業",
+            "規内": 12.5,
+            "規外": 1.0,
+            "計": 13.5,
+            "規外比率": 0.074
+          }
+        ],
+        "total": 1245
+      }
+    },
+    "master": {
+      "endpoints": [
+        {
+          "endpoint": "GET /api/codes/undefined",
+          "description": "未定義小区分一覧"
+        },
+        {
+          "endpoint": "PUT /api/codes/{subworkCode}",
+          "description": "名称/大区分の更新"
+        },
+        {
+          "endpoint": "GET /api/codes/diff?fromVersion=...",
+          "description": "差分取得"
+        }
+      ]
+    }
+  },
+  "aggregation_logic_sql": "WITH base AS (\n  SELECT\n    CASE\n      WHEN length(CAST(日付 AS TEXT)) = 8 THEN to_date(CAST(日付 AS TEXT),'YYYYMMDD')\n      WHEN CAST(日付 AS TEXT) ~ '^[0-9]+$' THEN to_timestamp( (CAST(日付 AS BIGINT) - 25569) * 86400 )::date\n      ELSE to_date(CAST(日付 AS TEXT),'YYYY-MM-DD')\n    END AS work_date,\n    業者名, 報告者名, 在籍, 雇 AS employment_code, 工事番号 AS project_code,\n    小区画 AS subarea_code, 小区分 AS subwork_code,\n    COALESCE(規内,0) AS in_hours,\n    COALESCE(規外,0) AS out_hours,\n    GREATEST(0, COALESCE(規内,0)+COALESCE(規外,0)) AS total_hours\n  FROM work_items_raw\n)\nSELECT\n  p.project_code AS 工事番号,\n  wc.major_code || ' ' || wc.major_name AS 大区分,\n  wc.subwork_code || ' ' || wc.subwork_name AS 小区分,\n  DATE_TRUNC('month', b.work_date)::date AS ym,\n  SUM(in_hours) AS 規内合計,\n  SUM(out_hours) AS 規外合計,\n  SUM(total_hours) AS 計合計,\n  CASE WHEN SUM(total_hours)=0 THEN NULL\n       ELSE SUM(out_hours)::decimal / SUM(total_hours) END AS 規外比率\nFROM base b\nLEFT JOIN work_codes wc ON b.subwork_code = wc.subwork_code\nLEFT JOIN projects p ON b.project_code = p.project_code\nGROUP BY 1,2,3,4\nORDER BY 4,1,2,3;",
+  "security_permissions": {
+    "auth": [
+      "SSO（Google/Microsoft）選択式",
+      "ローカル認証（オプション）"
+    ],
+    "rbac": {
+      "Viewer": [
+        "閲覧",
+        "エクスポート"
+      ],
+      "Editor": [
+        "取込",
+        "コード編集"
+      ],
+      "Admin": [
+        "権限付与",
+        "監査ログ",
+        "設定"
+      ]
+    },
+    "audit": "取込・更新・削除・ダウンロードの操作履歴を記録"
+  },
+  "operations_monitoring": {
+    "metrics": [
+      "p95 レイテンシ",
+      "取込失敗率",
+      "重複率",
+      "未定義コード件数"
+    ],
+    "alerts": [
+      "API 5xx",
+      "取込失敗 >2%/h",
+      "p95 > 2.5s"
+    ],
+    "backup_dr": "日次, 保持 35 日, 復旧手順 Runbook"
+  },
+  "acceptance_criteria": [
+    "2025-09 の全データを取込し、重複/欠損ゼロ（隔離の上 0 件）",
+    "フィルタ: 工事=S6290 × 大区分=組立(110) の規内/規外/計が Excel 手計算と一致（許容差 0）",
+    "業者=㈲三和工業、期間=2025-09-01..09-30 初回表示 3 秒以内",
+    "未定義 小区分 に警告表示→ コード表更新で即時反映",
+    "iPad Safari でホーム追加 → オフライン時に直近ビュー閲覧可"
+  ],
+  "risks_mitigations": [
+    {
+      "risk": "Excel 体裁揺れ",
+      "mitigation": "自動見出し検出 + 手動マッピング保存"
+    },
+    {
+      "risk": "コード未整備",
+      "mitigation": "未定義バケット & 一括編集"
+    },
+    {
+      "risk": "データ増大",
+      "mitigation": "テーブルパーティション + マテビュー"
+    },
+    {
+      "risk": "導入負荷",
+      "mitigation": "保存ビューのプリセット/テンプレ教育"
+    }
+  ],
+  "architecture": {
+    "frontend": "React + TypeScript + Vite + PWA（Workbox）",
+    "ui_lib": "Tailwind + shadcn/ui（大ボタン/テーブル/モーダル）",
+    "graph": "Recharts",
+    "backend": "FastAPI (Python) or NestJS (Node)",
+    "db": "PostgreSQL 15（Time-partition, MatView, RLS）",
+    "object_storage": "S3 互換（ファイル保管）",
+    "auth": "Google/Microsoft OAuth2 / or Email+Pass",
+    "infra": "Render / Fly.io / Cloud Run などマネージド",
+    "observability": "OpenTelemetry + Grafana/Loki/Tempo"
+  },
+  "implementation_tasks": [
+    "T1 取込 PoC: .xlsx → 見出し検出 → 正規化保存 → 結果レポート",
+    "T2 コード突合: LEFT JOIN + 未定義管理 UI",
+    "T3 集計 API: 任意軸 groupBy & metrics, ページング",
+    "T4 UI ピボット/グラフ/KPI: 保存ビュー + ドリルダウン",
+    "T5 PWA/オフライン: IndexedDB キャッシュ",
+    "T6 認証/RBAC/RLS",
+    "T7 エクスポート（CSV/PDF）",
+    "T8 監査ログ/メトリクス/アラート",
+    "T9 UAT & パフォーマンステスト"
+  ],
+  "env_examples": {
+    "DATABASE_URL": "postgres://...",
+    "S3_ENDPOINT": "...",
+    "S3_BUCKET": "dx-reports",
+    "JWT_SECRET": "...",
+    "GOOGLE_OAUTH_CLIENT_ID": "...",
+    "GOOGLE_OAUTH_CLIENT_SECRET": "..."
+  },
+  "sample_api_calls": [
+    "/api/aggregate?groupBy=工事番号,大区分,小区分&metrics=規内,規外,計&from=2025-09-01&to=2025-09-30&contractor=㈲三和工業&page=1&pageSize=50"
+  ],
+  "cursor_instructions": [
+    "この仕様に基づき フロント/バック/DB スキーマ/マイグレーション/CI を自動生成",
+    "まず T1〜T3 を完了し、モック UI に実データで集計が出る状態を最速で作る",
+    "以降 T4〜T9 をスプリントで段階実装"
+  ]
+}
